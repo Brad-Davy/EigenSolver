@@ -1,44 +1,84 @@
-
-
 """Dedalus simulation of 3d Rayleigh benard rotating convection
 
 Usage:
-    3d-rrbc.py --ra=<rayleigh> --ek=<ekman> --N=<resolution> --max_dt=<Maximum_dt> --init_dt=<Initial_dt> [--pr=<prandtl>] [--mesh=<mesh>]
-    3d-rrbc.py -h | --help
+    3d-eigen-rrbc.py [--ek=<ekman> --low_kx=<lower wavenumber> --high_kx=<higher wavenumber> --N=<Number of wavenumber> --low_Ra=<lower Rayleigh number> --high_Ra=<lower Rayleigh number> --N_Ra=<Number of samples> ]
+    3d-eigen-rrbc.py -h | --help
 
 Options:
-    -h --help   Display this help message
-    --ra=<rayliegh>        Rayleigh number
-    --ek=<ekman>           Ekman number
-    --N=<resolution>       Nx=Ny=2Nz
-    --max_dt=<Maximum_dt>  Maximum Time Step
-    --init_dt=<Initial_dt> Initial Time Step
-    --pr=<prandtl>         Prandtl number [default: 7]
-    --mesh=<mesh>          Parallel mesh [default: None]
+    -h --help                           Display this help message
+    --ek=<ekman>                        Ekman number [default: 1e-5]
+    --low_kx=<lower wavenumber>         Lower wavenumber [default: 1]
+    --high_kx=<higher wavenumber>       Higher wavenumber [default: 64]
+    --N=<Number of wavenumber>          Higher wavenumber [default: 100]
+    --low_Ra=<lower Rayleigh number>    Lower Rayleigh Number [default: 3e7]
+    --high_Ra=<lower Rayleigh number>   Higher Rayleigh Number [default: 4e7]
+    --N_Ra=<Number of samples>          Number of samples of the Ra [default: 10]
 """
 
-import time
+import time 
 import numpy as np
 import matplotlib.pyplot as plt
 import dedalus.public as de
 from mpi4py import MPI
 CW = MPI.COMM_WORLD
 import logging
+from docopt import docopt
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Dealing with the docopt arguments 
+# =============================================================================
 
+args = docopt(__doc__)
+Ekman  = float(args['--ek'])
+lowerKx  = float(args['--low_kx'])
+higherKx  = float(args['--high_kx'])
+NKx  = int(args['--N'])
+lowerRayleigh  = float(args['--low_Ra'])
+higherRayleigh  = float(args['--high_Ra'])
+numberOfRayleigh  = int(args['--N_Ra'])
+
+# =============================================================================
 # Global parameters
+# =============================================================================
+
 Nz = 64
 
+# =============================================================================
 # Create bases and domain
-# Use COMM_SELF so keep calculations independent between processes
+# =============================================================================
+
 z_basis = de.Chebyshev('z', Nz, interval=(-1/2, 1/2))
 domain = de.Domain([z_basis], grid_dtype=np.complex128, comm=MPI.COMM_SELF)
 
-# 2D Boussinesq hydrodynamics, with no-slip boundary conditions
-# Use substitutions for x and t derivatives
+# =============================================================================
+# 3D Boussinesq hydrodynamics, with no-slip boundary conditions
+# Use substitutions for x, y and t derivatives
+# =============================================================================
 
-def main(Rayleigh, Ekman, kx_range = [0,3,100], Prandtl = 1):
+def main(Rayleigh, Ekman, kx_range, Prandtl = 1):
+    """
+    
+
+    Parameters
+    ----------
+    Rayleigh : TYPE
+        DESCRIPTION.
+    Ekman : TYPE
+        DESCRIPTION.
+    kx_range : TYPE, optional
+        DESCRIPTION. The default is [0,3,100].
+    Prandtl : TYPE, optional
+        DESCRIPTION. The default is 1.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+    TYPE
+        DESCRIPTION.
+
+    """
     
     kx_global = np.linspace(kx_range[0], kx_range[1], kx_range[2])
     problem = de.EVP(domain, variables=['p','T','u','v','w','Tz','uz','wz','vz'], eigenvalue='omega')
@@ -51,17 +91,12 @@ def main(Rayleigh, Ekman, kx_range = [0,3,100], Prandtl = 1):
     problem.substitutions['dx(A)'] = "1j*kx*A"
     problem.substitutions['dt(A)'] = "-1j*omega*A"
 
-
     problem.add_equation("dx(u) + dy(v) + wz = 0")
     problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v*dy(T) + w*Tz)")
     problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v  = -(u*dx(u) + v*dy(u) + w*uz)")
     problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u  = -(u*dx(v) + v*dy(v) + w*vz)")
     problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
-    #problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz))  = -(u*dx(u) + v*dy(u) + w*uz)") ## Non rotating
-    #problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz))  = -(u*dx(v) + v*dy(v) + w*vz)") ## Non rotating
-
-
-
+    
     problem.add_equation("Tz - dz(T) = 0")
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("vz - dz(v) = 0")
@@ -76,22 +111,42 @@ def main(Rayleigh, Ekman, kx_range = [0,3,100], Prandtl = 1):
     problem.add_bc("left(v) = 0")
     solver = problem.build_solver()
 
+    # =============================================================================
     # Create function to compute max growth rate for given kx
+    # =============================================================================
+    
     def max_growth_rate(kx):
-        # Change kx parameter
+        """
+        
+
+        Parameters
+        ----------
+        kx : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
         problem.namespace['kx'].value = kx
-        # Solve for eigenvalues with sparse search near zero, rebuilding NCCs
         solver.solve_sparse(solver.pencils[0], N=10, target=0, rebuild_coeffs=True)
-        # Return largest imaginary part
         return np.max(solver.eigenvalues.imag)
 
+    # =============================================================================
     # Compute growth rate over local wavenumbers
+    # =============================================================================
+    
     kx_local = kx_global[CW.rank::CW.size]
     t1 = time.time()
     growth_local = np.array([max_growth_rate(kx) for kx in kx_local])
     t2 = time.time()
 
+    # =============================================================================
     # Reduce growth rates to root process
+    # =============================================================================
+    
     growth_global = np.zeros_like(kx_global)
     growth_global[CW.rank::CW.size] = growth_local
     if CW.rank == 0:
@@ -101,33 +156,65 @@ def main(Rayleigh, Ekman, kx_range = [0,3,100], Prandtl = 1):
 
 
     for idx,lines in enumerate(growth_global):
-   
         if lines > 0:
             if CW.rank==0:
                 print('Growth rate of mode {:.2f} is {:.2f}.'.format(kx_global[idx], lines))
     return growth_global, kx_global
 
-def check(array):
-   
-   unstable = False
-   indexes = []
-   for idx,elements in enumerate(array):
-       if elements > 0:
-           unstable = True
-           indexes.append(idx)
-   return unstable,indexes
-
-
-
-Ekman = 1e-5
-
-for Rayleigh in np.linspace(2e7, 4e7, 100):
+def checkStability(array):
+    """
     
-    growth_rates, kx = main(Rayleigh = Rayleigh, Ekman = Ekman, kx_range = [0,64,100])
-    instability, indexes = check(growth_rates)
-    if instability == True:
-        if CW.rank==0:
+
+    Parameters
+    ----------
+    array : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    unstable : TYPE
+        DESCRIPTION.
+    indexes : TYPE
+        DESCRIPTION.
+
+    """
+   
+    indexes = []
+    
+    for idx,elements in enumerate(array):
+        
+        if elements > 0:
+            indexes.append(idx)
+           
+    return len(indexes) != 0, indexes
+
+for Rayleigh in np.linspace(lowerRayleigh, higherRayleigh, numberOfRayleigh):
+    
+    growth_rates, kx = main(Rayleigh = Rayleigh, Ekman = Ekman, kx_range = [lowerKx, higherKx, NKx])
+    instability, indexes = checkStability(growth_rates)
+    
+    if instability:
+        if CW.rank == 0:
             print('Unstable mode found at {}, with Ra: {:.3e}, Ek: {:.3e}.'.format(indexes[0], Rayleigh, Ekman))
     else:
-        if CW.rank==0:
+        if CW.rank == 0:
             print('No instabilities found, with Ra: {:.3e}, Ek: {:.3e}.'.format(Rayleigh, Ekman))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
