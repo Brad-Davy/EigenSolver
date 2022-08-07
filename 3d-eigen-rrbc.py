@@ -1,18 +1,19 @@
 """Dedalus simulation of 3d Rayleigh benard rotating convection
 
 Usage:
-    3d-eigen-rrbc.py [--ek=<ekman> --low_kx=<lower wavenumber> --high_kx=<higher wavenumber> --N=<Number of wavenumber> --low_Ra=<lower Rayleigh number> --high_Ra=<lower Rayleigh number> --N_Ra=<Number of samples> ]
+    3d-eigen-rrbc.py [--ek=<ekman> --low_kx=<lower wavenumber> --high_kx=<higher wavenumber> --N=<Number of wavenumber> --low_Ra=<lower Rayleigh number> --high_Ra=<lower Rayleigh number> --N_Ra=<Number of samples> --domain=<lenght of domain>]
     3d-eigen-rrbc.py -h | --help
 
 Options:
     -h --help                           Display this help message
     --ek=<ekman>                        Ekman number [default: 1e-5]
-    --low_kx=<lower wavenumber>         Lower wavenumber [default: 1]
-    --high_kx=<higher wavenumber>       Higher wavenumber [default: 64]
+    --low_kx=<lower wavenumber>         Lower wavenumber [default: 0]
+    --high_kx=<higher wavenumber>       Higher wavenumber [default: 2]
     --N=<Number of wavenumber>          Higher wavenumber [default: 100]
     --low_Ra=<lower Rayleigh number>    Lower Rayleigh Number [default: 3e7]
     --high_Ra=<lower Rayleigh number>   Higher Rayleigh Number [default: 4e7]
     --N_Ra=<Number of samples>          Number of samples of the Ra [default: 10]
+    --domain=<lenght of domain>         Domain size [default: 2]
 """
 
 import time 
@@ -37,6 +38,7 @@ NKx  = int(args['--N'])
 lowerRayleigh  = float(args['--low_Ra'])
 higherRayleigh  = float(args['--high_Ra'])
 numberOfRayleigh  = int(args['--N_Ra'])
+domainSize  = int(args['--domain'])
 
 # =============================================================================
 # Global parameters
@@ -156,8 +158,8 @@ def main(Rayleigh, Ekman, kx_range, Prandtl = 1):
 
 
     for idx,lines in enumerate(growth_global):
-        if lines > 0:
-            if CW.rank==0:
+        if lines > 0 and kx_global[idx] < domainSize:
+            if CW.rank == 0:
                 print('Growth rate of mode {:.2f} is {:.2f}.'.format(kx_global[idx], lines))
     return growth_global, kx_global
 
